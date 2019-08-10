@@ -1,22 +1,17 @@
-package postgres
+package postgresdb
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
-	"testing"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 const connStrTemplate string = "user=%s dbname=%s host=%s port=%s password=%s sslmode=%s"
-const defaultDBScenarioPath = "file://."
 
 type containerizedDatabaseContext struct {
 	Conn      *sql.DB
@@ -24,7 +19,7 @@ type containerizedDatabaseContext struct {
 	Ctx       context.Context
 }
 
-type containerDatabaseTest struct {
+type postgresContainer struct {
 	timeout       time.Duration
 	sslmode       string
 	dbName        string
@@ -33,107 +28,74 @@ type containerDatabaseTest struct {
 	migrationPath string
 }
 
-func DefaultContainerDatabaseTest() *containerDatabaseTest {
-	return &containerDatabaseTest{
-		timeout:       10 * time.Second,
-		dbName:        "postgres",
-		user:          "postgres",
-		password:      "postgres",
-		sslmode:       "disable",
-		migrationPath: defaultDBScenarioPath,
+func DefaultPostgresContainer() *postgresContainer {
+	return &postgresContainer{
+		timeout:  10 * time.Second,
+		dbName:   "postgres",
+		user:     "postgres",
+		password: "postgres",
+		sslmode:  "disable",
 	}
 }
 
-func (c *containerDatabaseTest) WithTimeout(d time.Duration) {
+func (c *postgresContainer) WithTimeout(d time.Duration) {
 	c.timeout = d
 }
 
-func (c *containerDatabaseTest) WithDbUser(u string) {
+func (c *postgresContainer) WithDbUser(u string) {
 	c.user = u
 }
 
-func (c *containerDatabaseTest) WithDbPassword(p string) {
+func (c *postgresContainer) WithDbPassword(p string) {
 	c.password = p
 }
 
-func (c *containerDatabaseTest) WithDbName(db string) {
+func (c *postgresContainer) WithDbName(db string) {
 	c.dbName = db
 }
 
-func (c *containerDatabaseTest) WithDbSSLMode(mode string) {
+func (c *postgresContainer) WithDbSSLMode(mode string) {
 	c.sslmode = mode
 }
 
-func (c *containerDatabaseTest) WithMigrationFile(path string) {
-	c.migrationPath = fmt.Sprintf("file://%s", path)
-}
-
-func (cdt *containerDatabaseTest) Setup(t *testing.T) (*sql.DB, func()) {
-	dbCtx := createContainerContext(cdt, t)
-	return dbCtx.Conn, func() {
-		if dbCtx.Conn != nil {
-			_ = dbCtx.Conn.Close()
-		}
-		_ = dbCtx.Container.Terminate(dbCtx.Ctx)
-	}
-}
-
-func createContainerContext(cdt *containerDatabaseTest, t *testing.T) *containerizedDatabaseContext {
+func (pc *postgresContainer) CreateContainerContext() (*containerizedDatabaseContext, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(cdt.timeout, cancel)
+	time.AfterFunc(pc.timeout, cancel)
 	postgresC, err := startPostgres(ctx)
 	if err != nil {
-		t.Fatal(err.Error())
+		return nil, err
 	}
-	connStr, err := buildConnStringFromContainer(ctx, cdt, postgresC)
+	connStr, err := buildConnStringFromContainer(ctx, pc, postgresC)
 	if err != nil {
-		t.Fatal(err.Error())
+		return nil, err
 	}
-	//GETTING DB CONNECTION
-	db := connect(ctx, connStr, t)
-	// if !strings.HasSuffix(err.Error(), "connection reset by peer") ||
-	// 	!strings.HasSuffix(err.Error(), "the database system is starting up") {
-	// 	t.Fatalf("could not ping DB... %v", err)
-	// }
-	//RUN MIGRATIONS
-	err = runMigrations(cdt.migrationPath, db, t)
+
+	db, err := connect(ctx, connStr)
 	if err != nil {
-		t.Fatal(err.Error())
+		return nil, err
 	}
 
 	databaseContext := &containerizedDatabaseContext{
 		Conn:      db,
 		Container: postgresC,
 	}
-	return databaseContext
+	return databaseContext, nil
 }
 
-func connect(ctx context.Context, connStr string, t *testing.T) *sql.DB {
+func connect(ctx context.Context, connStr string) (*sql.DB, error) {
 	dbConn, err := sql.Open("postgres", connStr)
 	if err != nil {
-		t.Fatalf("could not connect to the Postgres database... %v", err)
+		return nil, fmt.Errorf("could not connect to the Postgres database... %v", err)
 	}
-	ping := make(chan bool)
-
-	go func(dbConn *sql.DB, c chan bool) {
-		defer close(ping)
-		for {
-			err = dbConn.Ping()
-			if err == nil {
-				c <- true
-				break
-			}
-		}
-	}(dbConn, ping)
+	pingChan := make(chan bool)
+	go ping(dbConn, pingChan)
 
 	select {
-	case <-ping:
-		return dbConn
+	case <-pingChan:
+		return dbConn, nil
 	case <-ctx.Done():
-		t.Fatalf("could not ping DB... %v", err)
+		return nil, fmt.Errorf("could not ping DB... %v", err)
 	}
-
-	return dbConn
 }
 
 func ping(dbConn *sql.DB, c chan bool) {
@@ -147,25 +109,7 @@ func ping(dbConn *sql.DB, c chan bool) {
 	}
 }
 
-func runMigrations(migrationsPath string, dbConn *sql.DB, t *testing.T) error {
-	driver, err := postgres.WithInstance(dbConn, &postgres.Config{})
-	if err != nil {
-		t.Fatalf("migration failed... %v", err)
-	}
-	m, err := migrate.NewWithDatabaseInstance(
-		migrationsPath, "postgres", driver)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	if m != nil {
-		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-			t.Fatalf("An error occurred while syncing the database.. %v", err)
-		}
-	}
-	return err
-}
-
-func buildConnStringFromContainer(ctx context.Context, cdt *containerDatabaseTest, postgresC testcontainers.Container) (string, error) {
+func buildConnStringFromContainer(ctx context.Context, pc *postgresContainer, postgresC testcontainers.Container) (string, error) {
 	host, err := postgresC.Host(ctx)
 	if err != nil {
 		return "", err
@@ -174,7 +118,7 @@ func buildConnStringFromContainer(ctx context.Context, cdt *containerDatabaseTes
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(connStrTemplate, cdt.user, cdt.dbName, host, port.Port(), cdt.password, cdt.sslmode), nil
+	return fmt.Sprintf(connStrTemplate, pc.user, pc.dbName, host, port.Port(), pc.password, pc.sslmode), nil
 }
 
 func startPostgres(ctx context.Context) (testcontainers.Container, error) {
