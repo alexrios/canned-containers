@@ -1,4 +1,4 @@
-package postgrtes_test
+package postgres_example
 
 import (
 	"context"
