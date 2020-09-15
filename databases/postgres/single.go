@@ -14,8 +14,8 @@ type containerizedDatabaseContext struct {
 	Conn      *sql.DB
 	Container testcontainers.Container
 	Ctx       context.Context
+	ConnStr   string
 }
-
 
 func (pc *postgresContainer) CreateContainerContext() (*containerizedDatabaseContext, error) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -37,10 +37,10 @@ func (pc *postgresContainer) CreateContainerContext() (*containerizedDatabaseCon
 	databaseContext := &containerizedDatabaseContext{
 		Conn:      db,
 		Container: postgresC,
+		ConnStr:   connStr,
 	}
 	return databaseContext, nil
 }
-
 
 func connect(ctx context.Context, connStr string) (*sql.DB, error) {
 	dbConn, err := sql.Open("postgres", connStr)

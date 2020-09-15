@@ -15,6 +15,7 @@ type containerizedDatabasePoolContext struct {
 	Pool      *pgxpool.Pool
 	Container testcontainers.Container
 	Ctx       context.Context
+	ConnStr   string
 }
 
 func (pc *postgresContainer) CreatePoolContainerContext() (*containerizedDatabasePoolContext, error) {
@@ -37,6 +38,7 @@ func (pc *postgresContainer) CreatePoolContainerContext() (*containerizedDatabas
 	databaseContext := &containerizedDatabasePoolContext{
 		Pool:      pool,
 		Container: postgresC,
+		ConnStr:   connStr,
 	}
 	return databaseContext, nil
 }
@@ -53,7 +55,7 @@ func connectPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 	}
 }
 
-func tryConnect(ctx context.Context,connStr string, c chan *pgxpool.Pool) {
+func tryConnect(ctx context.Context, connStr string, c chan *pgxpool.Pool) {
 	for {
 		pool, err := pgxpool.Connect(ctx, connStr)
 		if err == nil {
