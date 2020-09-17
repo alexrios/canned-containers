@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const connStrPoolTemplate string = "user=%s dbname=%s host=%s port=%s password=%s pool_max_conns=1 sslmode=%s"
+const connStrPoolTemplate string = "postgres://%s:%s@%s:%s/%s?sslmode=%s"
 
 type containerizedDatabasePoolContext struct {
 	Pool      *pgxpool.Pool
@@ -74,5 +74,5 @@ func buildConnStringFromPoolContainer(ctx context.Context, pc *postgresContainer
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(connStrPoolTemplate, pc.user, pc.dbName, host, port.Port(), pc.password, pc.sslmode), nil
+	return fmt.Sprintf(connStrPoolTemplate, pc.user, pc.password, host, port.Port(), pc.dbName, pc.sslmode), nil
 }
