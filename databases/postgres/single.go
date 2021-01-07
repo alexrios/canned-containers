@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/testcontainers/testcontainers-go"
 	"time"
+
+	"github.com/testcontainers/testcontainers-go"
 )
 
-const connStrTemplate string = "user=%s dbname=%s host=%s port=%s password=%s sslmode=%s"
+const connStrTemplate string = "postgres://%s:%s@%s:%s/%s?sslmode=%s"
 
 type containerizedDatabaseContext struct {
 	Conn      *sql.DB
@@ -78,5 +79,5 @@ func buildConnStringFromContainer(ctx context.Context, pc *postgresContainer, po
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(connStrTemplate, pc.user, pc.dbName, host, port.Port(), pc.password, pc.sslmode), nil
+	return fmt.Sprintf(connStrTemplate, pc.user, pc.password, host, port.Port(), pc.dbName, pc.sslmode), nil
 }
